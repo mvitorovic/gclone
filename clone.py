@@ -11,8 +11,8 @@ import argparse
 configDir = os.environ['HOME'] + "/.config/gclone"
 rclone = "/usr/sbin/rclone"
 remoteName = "remote"
-localDir = "/home/miha/Google Drive"
-verbose = True
+localDir = os.environ['HOME'] + "/Google Drive"
+verbose = False
 debug = False
 useMd5 = True
 stdErrLogFile = open(configDir + "/error.log", 'w')
@@ -22,22 +22,16 @@ def init():
     if not os.path.exists(configDir):
         os.makedirs(configDir)
     dirs = {}
-    if (verbose):
-        print "Fetching remote folders data..."
+    verbosePrint("Fetching remote folders data...")
     readRemoteTree("/", dirs)
-    if (verbose):
-        print "Done."
-        print
+    verbosePrint("Done.\n")
     readRemoteFiles(dirs)
-    if (verbose and debug):
-        print "Final remote data structure:"
-        print dirs
-        print
+    debugPrint("Final remote data structure:\n" + str(dirs) + "\n")
     # put into the file
-    #remoteFile = open(configDir + "/remote-data", 'w')
+    remoteDataFile = open(configDir + "/remote-data", 'w')
     #remoteFile.write(dirs)
-    #json.dump(dirs, remoteFile)
-    #remoteFile.close()
+    json.dump(dirs, remoteDataFile, default=dateTimeSerializer)
+    remoteDataFile.close()
 
 def clone():
     print "clone"
@@ -56,28 +50,22 @@ def readRemoteTree(dir, dirs):
             'md5': "0",
             'type': "dir"
         }
-        if (verbose and debug):
-            print dirData
+        debugPrint(str(dirData))
         dirs[newDirName] = dirData
         readRemoteTree(newDirName, dirs)
     return dirs
 
 def readRemoteFiles(dirs):
-    if (verbose):
-        print "Fetching remote files..."
+    verbosePrint("Fetching remote files...")
     md5sums = {}
     if (useMd5):
         remoteMd5Files = check_output([rclone, "md5sum", remoteName + ":/"], stderr=stdErrLogFile)
         for line in remoteMd5Files.splitlines():
             fileLine = re.split(r"\s*", line, maxsplit=1)
             md5sums[fileLine[1]] = fileLine[0]
-        if (verbose and debug):
-            print "Remote file md5 checsums:"
-            print md5sums
-            print
+        debugPrint("Remote file md5 checsums:\n" + str(md5sums) + "\n")
 
-    if (verbose and debug):
-        print "Remote files data:"
+    debugPrint("Remote files data:")
     remoteFiles = check_output([rclone, "lsl", remoteName + ":/"], stderr=stdErrLogFile)
     for line in remoteFiles.splitlines():
         fileLine = re.split(r"\s*", line, maxsplit=4)
@@ -88,15 +76,27 @@ def readRemoteFiles(dirs):
             'md5': md5sums[fileLine[4]] if useMd5 else "0",
             'type': "file"
         }
-        if (verbose and debug):
-            print fileData
+        debugPrint(str(fileData))
         dirs[fileLine[4]] = fileData
     del md5sums
-    if (verbose):
-        print "Done."
-        print
+    verbosePrint("Done.\n")
     return
 
+def verbosePrint(str):
+    if (verbose):
+        print str
+
+def debugPrint(str):
+    if (verbose and debug):
+        print str
+
+def dateTimeSerializer(obj):
+    """JSON serializer datetime objects"""
+
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    else:
+        return obj
 
 # main program
 
