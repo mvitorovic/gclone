@@ -7,11 +7,15 @@ import re
 from datetime import datetime
 import json
 import argparse
+from time import ctime
+import hashlib
 
 configDir = os.environ['HOME'] + "/.config/gclone"
+remoteDataFileName = configDir + "/remote-data"
+localDataFileName = configDir + "/local-data"
 rclone = "/usr/sbin/rclone"
 remoteName = "remote"
-localDir = os.environ['HOME'] + "/Google Drive"
+localDir = os.environ['HOME'] + "/GDrive"
 verbose = False
 debug = False
 useMd5 = True
@@ -21,30 +25,42 @@ def init():
     print "Initializing..."
     if not os.path.exists(configDir):
         os.makedirs(configDir)
+
+    # Local files
+    localData = readLocalTree()
+
+    # put into the file
+    localDataFile = open(localDataFileName, 'w')
+    json.dump(localData, localDataFile, default=dateTimeSerializer)
+    localDataFile.close()
+
+    # Remote files
     dirs = {}
     verbosePrint("Fetching remote folders data...")
     readRemoteTree("/", dirs)
     verbosePrint("Done.\n")
     readRemoteFiles(dirs)
     debugPrint("Final remote data structure:\n" + str(dirs) + "\n")
+
     # put into the file
-    remoteDataFile = open(configDir + "/remote-data", 'w')
-    #remoteFile.write(dirs)
+    remoteDataFile = open(remoteDataFileName, 'w')
     json.dump(dirs, remoteDataFile, default=dateTimeSerializer)
     remoteDataFile.close()
 
 def clone():
     print "clone"
 
-def readRemoteTree(dir, dirs):
-    remoteDirs = check_output([rclone, "lsd", remoteName + ":" + dir], stderr=stdErrLogFile)
+def readRemoteTree(dirName, dirs):
+    """Gather data on all remote dirs"""
+
+    remoteDirs = check_output([rclone, "lsd", remoteName + ":" + dirName], stderr=stdErrLogFile)
     for line in remoteDirs.splitlines():
         dirRaw = re.split(r"\s*", line, maxsplit=5)
-        newDirName = dir + "/" + dirRaw[5]
-        if (dir == "/"):
-            newDirName = dir + dirRaw[5]
+        newDirName = dirName + "/" + dirRaw[5]
+        if (dirName == "/"):
+            newDirName = dirName + dirRaw[5]
         dirData = {
-            'size': 0, 
+            'size': 0L, 
             'date': datetime.strptime(dirRaw[2] + " " + dirRaw[3], "%Y-%m-%d %H:%M:%S"), 
             'name': newDirName,
             'md5': "0",
@@ -70,7 +86,7 @@ def readRemoteFiles(dirs):
     for line in remoteFiles.splitlines():
         fileLine = re.split(r"\s*", line, maxsplit=4)
         fileData = {
-            'size': int(fileLine[1]),
+            'size': long(fileLine[1]),
             'date': datetime.strptime(fileLine[2] + " " + fileLine[3][0:15], "%Y-%m-%d %H:%M:%S.%f"), 
             'name': fileLine[4],
             'md5': md5sums[fileLine[4]] if useMd5 else "0",
@@ -81,6 +97,51 @@ def readRemoteFiles(dirs):
     del md5sums
     verbosePrint("Done.\n")
     return
+
+def readLocalTree():
+    """Read data on all local dirs."""
+
+    localData = {}
+    verbosePrint("Inspecting local files and folders.")
+    for root, dirs, files in os.walk(localDir):
+        relativeDir = root[len(localDir):]
+        fileBase = ""
+        if (len(relativeDir) > 0):
+            localData[relativeDir] = localDirData(root, relativeDir)
+            fileBase = relativeDir[1:] + "/"
+        for fileName in files:
+            localData[fileBase + fileName] = localFileData(root + "/" + fileName, fileBase + fileName)
+    debugPrint("Local file and folder data:\n" + str(localData))
+    return localData
+
+def localDirData(dirName, relativeDir):
+    dirInfo = os.lstat(dirName)
+    dirData = {
+        'size': 0,
+        'date': datetime.fromtimestamp(dirInfo.st_mtime).replace(microsecond=0),
+        'name': relativeDir,
+        'md5': "0",
+        'type': "dir"
+    }
+    return dirData
+
+def localFileData(fileName, relativeFileName, calcMd5=True):
+    fileInfo = os.lstat(fileName)
+    fileData = {
+        'size': fileInfo.st_size,
+        'date': datetime.fromtimestamp(fileInfo.st_mtime),
+        'name': relativeFileName,
+        'md5': md5(fileName) if calcMd5 else "0",
+        'type': "file"
+    }
+    return fileData
+
+def md5(fname):
+    hash = hashlib.md5()
+    with open(fname, "rb") as f:
+        for chunk in iter(lambda: f.read(102400), b""):
+            hash.update(chunk)
+    return hash.hexdigest()
 
 def verbosePrint(str):
     if (verbose):
