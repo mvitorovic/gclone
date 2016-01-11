@@ -10,6 +10,8 @@ import argparse
 from time import ctime
 import hashlib
 
+# Configuration variables
+
 configDir = os.environ['HOME'] + "/.config/gclone"
 remoteDataFileName = configDir + "/remote-data"
 localDataFileName = configDir + "/local-data"
@@ -19,6 +21,10 @@ localDir = os.environ['HOME'] + "/GDrive"
 verbose = False
 debug = False
 useMd5 = True
+fastRemote = False
+
+# Configuration variables - End
+
 stdErrLogFile = open(configDir + "/error.log", 'w')
 
 def init():
@@ -49,9 +55,15 @@ def init():
 
 def clone():
     print "clone"
+    dirs = {}
+    files = readRemoteFiles(dirs, fastRemoteHandling=fastRemote)
+    print dirs
 
-def readRemoteTree(dirName, dirs):
+def readRemoteTree(dirName, dirs, fastRemoteHandling=False):
     """Gather data on all remote dirs"""
+
+    if (not fastRemoteHandling):
+        return dirs
 
     remoteDirs = check_output([rclone, "lsd", remoteName + ":" + dirName], stderr=stdErrLogFile)
     for line in remoteDirs.splitlines():
@@ -68,10 +80,10 @@ def readRemoteTree(dirName, dirs):
         }
         debugPrint(str(dirData))
         dirs[newDirName] = dirData
-        readRemoteTree(newDirName, dirs)
+        readRemoteTree(newDirName, dirs, fastRemoteHandling)
     return dirs
 
-def readRemoteFiles(dirs):
+def readRemoteFiles(dirs, fastRemoteHandling=False):
     verbosePrint("Fetching remote files...")
     md5sums = {}
     if (useMd5):
@@ -94,9 +106,30 @@ def readRemoteFiles(dirs):
         }
         debugPrint(str(fileData))
         dirs[fileLine[4]] = fileData
+        if (fastRemoteHandling):
+            deduceDirName(dirs, fileLine[4])
     del md5sums
     verbosePrint("Done.\n")
-    return
+    return dirs
+
+def deduceDirName(dirs, fileName):
+    """Adds the file's parent dir as an entry"""
+
+    try:
+        lastDel = fileName.rindex("/")
+        dirData = {
+            'size': 0L, 
+            'date': datetime.now(), 
+            'name': fileName[:lastDel],
+            'md5': "0",
+            'type': "dir"
+            }
+        dirs[fileName[:lastDel]] = dirData
+        debugPrint(str(dirData))
+    except ValueError:
+        pass
+
+    return dir
 
 def readLocalTree():
     """Read data on all local dirs."""
@@ -166,16 +199,20 @@ argParser.add_argument("init", help="Initialize the application. Create state de
 argParser.add_argument("clone", help="Synchronize with Google drive.", nargs='?')
 argParser.add_argument("-v", "--verbose", help="Print progress.", default=False, action="store_true")
 argParser.add_argument("-d", "--debug", help="Print debugging information.", default=False, action="store_true")
-argParser.add_argument("--md5", help="Use MD5 checksums when synchronizing.", default=False, action="store_true")
+argParser.add_argument("--no-md5", help="Don't use MD5 checksums when synchronizing.", 
+    default=True, action="store_false", dest="md5")
+argParser.add_argument("--fast-remote", help="Deduce dir folders from remote file listing.", default=False, 
+    action="store_true", dest="fastRemote")
 
 args = argParser.parse_args()
 verbose = args.verbose
 debug = args.debug
 useMd5 = args.md5
+fastRemote = args.fastRemote
 
-if args.init:
+if args.init == "init":
     init()
-elif args.clone:
+elif args.init == "clone":
     clone()
 else:
     argParser.print_help()
