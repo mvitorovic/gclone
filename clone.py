@@ -1,16 +1,19 @@
 #!/usr/bin/python
 
-import sys
-import os
-from subprocess import check_output
-import re
-from datetime import datetime
-import json
-import argparse
-from time import ctime
-import hashlib
+import sys, os, re, json, hashlib
 
+from subprocess import check_output
+from datetime import datetime
+from time import ctime
+
+import argparse
+from argparse import RawTextHelpFormatter
+
+##################################################
+#
 # Configuration variables
+#
+##################################################
 
 configDir = os.environ['HOME'] + "/.config/gclone"
 remoteDataFileName = configDir + "/remote-data"
@@ -22,10 +25,15 @@ verbose = False
 debug = False
 useMd5 = True
 fastRemote = False
-
-# Configuration variables - End
+dryRun = False
 
 stdErrLogFile = open(configDir + "/error.log", 'w')
+
+##################################################
+#
+# Configuration variables - End
+#
+##################################################
 
 def init():
     print "Initializing..."
@@ -59,17 +67,25 @@ def clone():
     files = readRemoteFiles(dirs, fastRemoteHandling=fastRemote)
     print dirs
 
+def config():
+    print "Configuration directory: " + configDir
+    print "Remote state file name:  " + remoteDataFileName
+    print "Local state file name:   " + localDataFileName
+    print "Path to rclone:          " + rclone
+    print "The name of the remote:  " + remoteName
+    print "Local directory:         " + localDir
+
 def readRemoteTree(dirName, dirs, fastRemoteHandling=False):
     """Gather data on all remote dirs"""
 
-    if (not fastRemoteHandling):
+    if not fastRemoteHandling:
         return dirs
 
     remoteDirs = check_output([rclone, "lsd", remoteName + ":" + dirName], stderr=stdErrLogFile)
     for line in remoteDirs.splitlines():
         dirRaw = re.split(r"\s*", line, maxsplit=5)
         newDirName = dirName + "/" + dirRaw[5]
-        if (dirName == "/"):
+        if dirName == "/":
             newDirName = dirName + dirRaw[5]
         dirData = {
             'size': 0L, 
@@ -86,7 +102,7 @@ def readRemoteTree(dirName, dirs, fastRemoteHandling=False):
 def readRemoteFiles(dirs, fastRemoteHandling=False):
     verbosePrint("Fetching remote files...")
     md5sums = {}
-    if (useMd5):
+    if useMd5:
         remoteMd5Files = check_output([rclone, "md5sum", remoteName + ":/"], stderr=stdErrLogFile)
         for line in remoteMd5Files.splitlines():
             fileLine = re.split(r"\s*", line, maxsplit=1)
@@ -106,7 +122,7 @@ def readRemoteFiles(dirs, fastRemoteHandling=False):
         }
         debugPrint(str(fileData))
         dirs[fileLine[4]] = fileData
-        if (fastRemoteHandling):
+        if fastRemoteHandling:
             deduceDirName(dirs, fileLine[4])
     del md5sums
     verbosePrint("Done.\n")
@@ -127,7 +143,7 @@ def deduceDirName(dirs, fileName):
         dirs[fileName[:lastDel]] = dirData
         debugPrint(str(dirData))
     except ValueError:
-        pass
+        pass # files in root dir are not preceeded by a '/'
 
     return dir
 
@@ -139,7 +155,7 @@ def readLocalTree():
     for root, dirs, files in os.walk(localDir):
         relativeDir = root[len(localDir):]
         fileBase = ""
-        if (len(relativeDir) > 0):
+        if len(relativeDir) > 0:
             localData[relativeDir] = localDirData(root, relativeDir)
             fileBase = relativeDir[1:] + "/"
         for fileName in files:
@@ -177,43 +193,56 @@ def md5(fname):
     return hash.hexdigest()
 
 def verbosePrint(str):
-    if (verbose):
+    if verbose:
         print str
 
 def debugPrint(str):
-    if (verbose and debug):
+    if verbose and debug:
         print str
 
 def dateTimeSerializer(obj):
-    """JSON serializer datetime objects"""
+    """JSON serializer for datetime objects"""
 
     if isinstance(obj, datetime):
         return obj.isoformat()
     else:
         return obj
 
+##################################################
+#
 # main program
+#
+##################################################
 
-argParser = argparse.ArgumentParser(description="Utility to clone Google drive using rclone.")
-argParser.add_argument("init", help="Initialize the application. Create state description files.", nargs='?')
-argParser.add_argument("clone", help="Synchronize with Google drive.", nargs='?')
+argParser = argparse.ArgumentParser(description="Utility to clone Google drive using rclone.", 
+    formatter_class=RawTextHelpFormatter)
+argParser.add_argument("cmd", choices=["init", "clone", "config"], help=
+"""init   - Initialize the application and create state
+         description files.
+clone  - Synchronize with Google drive.
+config - Print the program configuration.""")
 argParser.add_argument("-v", "--verbose", help="Print progress.", default=False, action="store_true")
 argParser.add_argument("-d", "--debug", help="Print debugging information.", default=False, action="store_true")
-argParser.add_argument("--no-md5", help="Don't use MD5 checksums when synchronizing.", 
-    default=True, action="store_false", dest="md5")
-argParser.add_argument("--fast-remote", help="Deduce dir folders from remote file listing.", default=False, 
+argParser.add_argument("--no-md5", help="Don't use MD5 checksums when synchronizing.", default=True, 
+    action="store_false", dest="md5")
+argParser.add_argument("--fast-remote", help="Deduce dir names from remote file listing.", default=False, 
     action="store_true", dest="fastRemote")
+argParser.add_argument("--dry-run", help="Only print the resulting actions, do not execute them.", default=False, 
+    action="store_true", dest="dryRun")
 
 args = argParser.parse_args()
 verbose = args.verbose
 debug = args.debug
 useMd5 = args.md5
 fastRemote = args.fastRemote
+dryRun = args.dryRun
 
-if args.init == "init":
+if args.cmd == "init":
     init()
-elif args.init == "clone":
+elif args.cmd == "clone":
     clone()
+elif args.cmd == "config":
+    config()
 else:
     argParser.print_help()
 
