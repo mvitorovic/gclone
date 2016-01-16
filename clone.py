@@ -62,10 +62,18 @@ def init():
     remoteDataFile.close()
 
 def clone():
-    print "clone"
+    with open(remoteDataFileName) as dataFile:
+        oldRemoteData = json.load(dataFile, object_pairs_hook=dateTimeDeserailizer)
+
+    with open(localDataFileName) as dataFile:
+        oldLocalData = json.load(dataFile, object_pairs_hook=dateTimeDeserailizer)
+
+    #read new remote files
     dirs = {}
-    files = readRemoteFiles(dirs, fastRemoteHandling=fastRemote)
-    print dirs
+    newRemoteFiles = readRemoteFiles(dirs, fastRemoteHandling=fastRemote)
+
+    #read new local files
+    newLocalData = readLocalTree()
 
 def config():
     print "Configuration directory: " + configDir
@@ -207,6 +215,22 @@ def dateTimeSerializer(obj):
         return obj.isoformat()
     else:
         return obj
+
+def dateTimeDeserailizer(pairs):
+    """JSON deserializer for dateime objects"""
+    d = {}
+    for k, v in pairs:
+        if isinstance(v, basestring):
+            for dateFormat in ["%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"]:
+                try:
+                    d[k] = datetime.strptime(v, dateFormat)
+                    break
+                except ValueError:
+                    d[k] = v
+        else:
+            d[k] = v
+    return d
+
 
 ##################################################
 #
