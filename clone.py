@@ -26,12 +26,21 @@ debug = False
 useMd5 = True
 fastRemote = False
 dryRun = False
+ADD = "add"
+DEL = "remove"
+MOD = "modify"
 
 stdErrLogFile = open(configDir + "/error.log", 'w')
 
 ##################################################
 #
 # Configuration variables - End
+#
+##################################################
+
+##################################################
+#
+# Main commands
 #
 ##################################################
 
@@ -62,6 +71,7 @@ def init():
     remoteDataFile.close()
 
 def clone():
+    verbosePrint("Reading state data...")
     with open(remoteDataFileName) as dataFile:
         oldRemoteData = json.load(dataFile, object_pairs_hook=dateTimeDeserailizer)
 
@@ -70,10 +80,22 @@ def clone():
 
     #read new remote files
     dirs = {}
-    newRemoteFiles = readRemoteFiles(dirs, fastRemoteHandling=fastRemote)
+    verbosePrint("Fetching remote folders data...")
+    readRemoteTree("/", dirs, fastRemoteHandling=fastRemote)
+    verbosePrint("Done.\n")
+    newRemoteData = readRemoteFiles(dirs, fastRemoteHandling=fastRemote)
 
     #read new local files
     newLocalData = readLocalTree()
+
+    verbosePrint("Calculating action lists...")
+    incoming = compareStates(oldRemoteData, newRemoteData)
+    outgoing = compareStates(oldLocalData, newLocalData)
+
+    printActionList("INCOMING", incoming)
+    print
+    printActionList("OUTGOING", outgoing)
+    print
 
 def config():
     print "Configuration directory: " + configDir
@@ -83,10 +105,16 @@ def config():
     print "The name of the remote:  " + remoteName
     print "Local directory:         " + localDir
 
+##################################################
+#
+# Building remote file information
+#
+##################################################
+
 def readRemoteTree(dirName, dirs, fastRemoteHandling=False):
     """Gather data on all remote dirs"""
 
-    if not fastRemoteHandling:
+    if fastRemoteHandling:
         return dirs
 
     remoteDirs = check_output([rclone, "lsd", remoteName + ":" + dirName], stderr=stdErrLogFile)
@@ -137,23 +165,31 @@ def readRemoteFiles(dirs, fastRemoteHandling=False):
     return dirs
 
 def deduceDirName(dirs, fileName):
-    """Adds the file's parent dir as an entry"""
+    """Adds the file's parent dirs as an entry"""
 
     try:
         lastDel = fileName.rindex("/")
+        dirName = "/" + fileName[:lastDel]
         dirData = {
             'size': 0L, 
             'date': datetime.now(), 
-            'name': fileName[:lastDel],
+            'name': dirName,
             'md5': "0",
             'type': "dir"
             }
-        dirs[fileName[:lastDel]] = dirData
+        dirs[dirName] = dirData
         debugPrint(str(dirData))
+        deduceDirName(dirs, fileName[:lastDel])
     except ValueError:
         pass # files in root dir are not preceeded by a '/'
 
-    return dir
+    return dirs
+
+##################################################
+#
+# Building local file information
+#
+##################################################
 
 def readLocalTree():
     """Read data on all local dirs."""
@@ -193,6 +229,12 @@ def localFileData(fileName, relativeFileName, calcMd5=True):
     }
     return fileData
 
+##################################################
+#
+# Helper functions
+#
+##################################################
+
 def md5(fname):
     hash = hashlib.md5()
     with open(fname, "rb") as f:
@@ -207,6 +249,12 @@ def verbosePrint(str):
 def debugPrint(str):
     if verbose and debug:
         print str
+
+##################################################
+#
+# Datetime serializer/deserializer
+#
+##################################################
 
 def dateTimeSerializer(obj):
     """JSON serializer for datetime objects"""
@@ -231,6 +279,62 @@ def dateTimeDeserailizer(pairs):
             d[k] = v
     return d
 
+##################################################
+#
+# Calculation sync actions
+#
+##################################################
+
+def compareStates(oldState, newState):
+    actionList = []
+    oldStateCopy = dict(oldState)
+    newStateCopy = dict(newState)
+    # find incoming add or modify changes
+    for k, v in newState.iteritems():
+        try:
+            oldVal = oldState[k]
+            if not isStateEqual(oldVal, v):
+                action = {}
+                action['object'] = v
+                action['actionType'] = MOD
+                actionList.append(action)
+            del oldStateCopy[k]
+            del newStateCopy[k]
+        except KeyError:
+            # newState contains file that is not present in old state -> ADD
+            action = {}
+            action['object'] = v
+            action['actionType'] = ADD
+            actionList.append(action)
+            del newStateCopy[k]
+    # whaetever is left in oldState is deleted in newState
+    for k, v in oldStateCopy.iteritems():
+        action = {}
+        action['object'] = v
+        action['actionType'] = DEL
+        actionList.append(action)
+
+    return actionList
+
+def isStateEqual(oldState, newState):
+    if oldState['type'] != newState['type']:
+        raise Exception("Type of entry changed: [old]:" + oldState['type'] + " [new]:" + newState['type'], 
+            oldState['name'])
+    if oldState['type'] == "dir":
+        return True
+    if oldState['size'] != newState['size']:
+        return False
+    if oldState['date'] != newState['date']:
+        return False
+    if useMd5:
+        if oldState['md5'] != "0" and newState['md5'] != "0" and oldState['md5'] != newState['md5']:
+            return False
+    return True
+
+def printActionList(name, list):
+    print "Action list " + name + ":"
+    for action in list:
+        print action['actionType'].ljust(10) + ":: " + str(action['object'])
 
 ##################################################
 #
