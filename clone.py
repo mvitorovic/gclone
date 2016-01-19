@@ -3,6 +3,7 @@
 import sys, os, re, json, hashlib
 
 from subprocess import check_output
+from subprocess import CalledProcessError
 from datetime import datetime
 from time import ctime
 
@@ -291,14 +292,15 @@ def compareStates(oldState, newState):
     newStateCopy = dict(newState)
     # find incoming add or modify changes
     for k, v in newState.iteritems():
+        key = k.decode('utf-8')
         try:
-            oldVal = oldState[k]
+            oldVal = oldState[key]
             if not isStateEqual(oldVal, v):
                 action = {}
                 action['object'] = v
                 action['actionType'] = MOD
                 actionList.append(action)
-            del oldStateCopy[k]
+            del oldStateCopy[key]
             del newStateCopy[k]
         except KeyError:
             # newState contains file that is not present in old state -> ADD
@@ -335,6 +337,13 @@ def printActionList(name, list):
     print "Action list " + name + ":"
     for action in list:
         print action['actionType'].ljust(10) + ":: " + str(action['object'])
+
+def remoteDirExists(dirName):
+    try:
+        remoteOutput = check_output([rclone, "lsd", remoteName + ":" + dirName], stderr=stdErrLogFile)
+    except CalledProcessError as e:
+        return False
+    return True
 
 ##################################################
 #
