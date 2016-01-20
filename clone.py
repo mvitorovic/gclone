@@ -93,10 +93,20 @@ def clone():
     incoming = compareStates(oldRemoteData, newRemoteData)
     outgoing = compareStates(oldLocalData, newLocalData)
 
-    printActionList("INCOMING", incoming)
-    print
-    printActionList("OUTGOING", outgoing)
-    print
+    if (fastRemote):
+        incoming = checkIncomingFolderDeletes(incoming)
+
+    conflicts = checkForConflicts(incoming, outgoing)
+
+    if (dryRun):
+        printActionList("INCOMING", incoming)
+        print
+        printActionList("OUTGOING", outgoing)
+        print
+        print "CONFLICTS"
+        print conflicts
+    else:
+        print "implement ection reply"
 
 def config():
     print "Configuration directory: " + configDir
@@ -344,6 +354,21 @@ def remoteDirExists(dirName):
     except CalledProcessError as e:
         return False
     return True
+
+def checkIncomingFolderDeletes(incoming):
+    verbosePrint("Checking whether folder deletes are true positives...")
+    return [x for x in incoming if not isDelFalse(x)]
+
+def isDelFalse(action):
+    actionType = action['actionType']
+    targetDescriptor = action['object']
+    targetNane = targetDescriptor['name']
+    objType = targetDescriptor['type']
+    return actionType == DEL and objType == "dir" and remoteDirExists(targetNane)
+
+def checkForConflicts(incloming, outgoing):
+    print "TODO implement conflict checking!!!!"
+    return []
 
 ##################################################
 #
