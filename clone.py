@@ -27,9 +27,20 @@ debug = False
 useMd5 = True
 fastRemote = False
 dryRun = False
+#
+# Action enum
+#
 ADD = "add"
 DEL = "remove"
 MOD = "modify"
+
+#
+# Conflict enum
+#
+CONFLICT_ADD = "add_conflict"
+CONFLICT_MOD = "mod_conflict"
+CONFLICT_DEL = "del_conflict"
+CONFLICT_ERR = "error"
 
 stdErrLogFile = open(configDir + "/error.log", 'w')
 
@@ -106,7 +117,7 @@ def clone():
         print "CONFLICTS"
         print conflicts
     else:
-        print "implement ection reply"
+        print "implement action reply"
 
 def config():
     print "Configuration directory: " + configDir
@@ -159,18 +170,23 @@ def readRemoteFiles(dirs, fastRemoteHandling=False):
     debugPrint("Remote files data:")
     remoteFiles = check_output([rclone, "lsl", remoteName + ":/"], stderr=stdErrLogFile)
     for line in remoteFiles.splitlines():
+        debugPrint(line)
         fileLine = re.split(r"\s*", line, maxsplit=4)
+        # Positions
+        sizePos, datePos, timePos, fnamePos = (1, 2, 3, 4)
+        if fileLine[0]:
+            sizePos, datePos, timePos, fnamePos = (0, 1, 2, 3)
         fileData = {
-            'size': long(fileLine[1]),
-            'date': datetime.strptime(fileLine[2] + " " + fileLine[3][0:15], "%Y-%m-%d %H:%M:%S.%f"), 
-            'name': fileLine[4],
-            'md5': md5sums[fileLine[4]] if useMd5 else "0",
+            'size': long(fileLine[sizePos]),
+            'date': datetime.strptime(fileLine[datePos] + " " + fileLine[timePos][0:15], "%Y-%m-%d %H:%M:%S.%f"), 
+            'name': fileLine[fnamePos],
+            'md5': md5sums[fileLine[fnamePos]] if useMd5 else "0",
             'type': "file"
         }
         debugPrint(str(fileData))
-        dirs[fileLine[4]] = fileData
+        dirs[fileLine[fnamePos]] = fileData
         if fastRemoteHandling:
-            deduceDirName(dirs, fileLine[4])
+            deduceDirName(dirs, fileLine[fnamePos])
     del md5sums
     verbosePrint("Done.\n")
     return dirs
@@ -366,9 +382,32 @@ def isDelFalse(action):
     objType = targetDescriptor['type']
     return actionType == DEL and objType == "dir" and remoteDirExists(targetNane)
 
-def checkForConflicts(incloming, outgoing):
-    print "TODO implement conflict checking!!!!"
-    return []
+def checkForConflicts(incoming, outgoing):
+    conflictList = []
+    for inAction in incoming:
+        for outAction in outgoing:
+            if (inAction['object']['name'] == outAction['object']['name']):
+                cType = conflictType(inAction['actionType'], outAction['actionType'])
+                # delete from both sides is OK. The end result is the same.
+                if (cType != CONFLICT_DEL):
+                    conflictInfo = {}
+                    conflictInfo['conflictType'] = cType
+                    conflictInfo['inAction'] = inAction['actionType']
+                    conflictInfo['outAction'] = outAction['actionType']
+                    conflictInfo['inObject'] = inAction['object']
+                    conflictInfo['outObject'] = outAction['object']
+                    conflictList.append(conflictInfo)
+    return conflictList
+
+def conflictType(inActionType, outActionType):
+    if (inActionType == ADD and outActionType == ADD):
+        return CONFLICT_ADD
+    elif (inActionType == MOD and outActionType == MOD):
+        return CONFLICT_MOD
+    elif (inActionType == DEL and outActionType == DEL):
+        return CONFLICT_DEL
+    else:
+        return CONFLICT_ERR
 
 ##################################################
 #
